@@ -1,17 +1,21 @@
 name: Build Overworld Plus
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build mod
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Java 21
@@ -19,141 +23,53 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.14.4
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.4'
-          cache-disabled: true
+          cache-provider: basic
 
-      - name: Find mod ZIP
+      - name: Locate Gradle project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          ZIP="OverworldPlus_1.21.10_v0.32.1_FixedBuild.zip"
+          PROJECT_DIR="$(find . -type f -name 'build.gradle' -print -quit | xargs -r dirname)"
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: Mod ZIP not found!"
-            echo "Files in repository:"
-            find . -maxdepth 3 -type f -print
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: build.gradle was not found."
+            find . -maxdepth 5 -type f | sort
             exit 1
           fi
-
-          echo "Found mod archive:"
-          ls -lh "$ZIP"
-
-      - name: Extract mod project
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf project
-          mkdir project
-
-          unzip -q "OverworldPlus_1.21.10_v0.32.1_FixedBuild.zip" -d project
-
-          echo "Searching for build.gradle..."
-
-          BUILD_FILE=$(find project -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -print -quit)
-
-          if [ -z "$BUILD_FILE" ]; then
-            echo "ERROR: build.gradle was not found!"
-            echo "Extracted files:"
-            find project -maxdepth 5 -type f -print
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$BUILD_FILE")
-
-          echo "Build file:"
-          echo "$BUILD_FILE"
-
-          echo "Project directory:"
-          echo "$PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Using project: $PROJECT_DIR"
 
-      - name: Verify project
-        shell: bash
+      - name: Repair known source errors
         run: |
-          set -e
+          python3 tools/fix_build.py "$PROJECT_DIR"
 
-          cd "$PROJECT_DIR"
-
-          echo "================================"
-          echo "Overworld Plus project"
-          echo "================================"
-
-          pwd
-
-          echo ""
-          echo "Project files:"
-          ls -la
-
-          echo ""
-          echo "Java:"
-          java -version
-
-          echo ""
-          echo "Gradle:"
-          gradle --version
+      - name: Validate Java source
+        run: |
+          python3 tools/validate_java.py "$PROJECT_DIR/src/main/java"
 
       - name: Build mod
-        shell: bash
         run: |
-          set -e
-
+          set -euo pipefail
           cd "$PROJECT_DIR"
-
-          echo "================================"
-          echo "BUILDING OVERWORLD PLUS"
-          echo "Minecraft: 1.21.10"
-          echo "Java: 21"
-          echo "Gradle: 8.14.4"
-          echo "================================"
 
           gradle clean build \
             --no-daemon \
-            --stacktrace
+            --stacktrace \
+            --warning-mode all
 
-      - name: Find JAR
-        shell: bash
-        run: |
-          set -e
-
-          echo "Searching for generated JAR..."
-
-          find "$PROJECT_DIR/build/libs" \
-            -maxdepth 1 \
-            -type f \
-            -name "*.jar" \
-            ! -name "*-sources.jar" \
-            -print
-
-          JAR=$(find "$PROJECT_DIR/build/libs" \
-            -maxdepth 1 \
-            -type f \
-            -name "*.jar" \
-            ! -name "*-sources.jar" \
-            -print -quit)
-
-          if [ -z "$JAR" ]; then
-            echo "ERROR: No JAR was generated!"
-            find "$PROJECT_DIR/build" -maxdepth 4 -type f -print
-            exit 1
-          fi
-
-          echo "Generated JAR:"
-          echo "$JAR"
-
-          echo "JAR=$JAR" >> "$GITHUB_ENV"
-
-      - name: Upload JAR
+      - name: Upload mod JAR
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: OverworldPlus-1.21.10
-          path: ${{ env.JAR }}
+          path: '**/build/libs/*.jar'
           if-no-files-found: error
+          retention-days: 14
