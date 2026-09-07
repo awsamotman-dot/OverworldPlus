@@ -1,4 +1,4 @@
-name: Build Overworld Plus
+name: Build Fabric Mod
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ jobs:
   build:
     name: Build Fabric Mod
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -24,33 +23,23 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
       - name: Make Gradle executable
-        run: chmod +x ./gradlew
+        run: chmod +x gradlew
 
-      - name: Check Java
-        run: java -version
+      - name: Build
+        run: ./gradlew clean build --no-daemon --stacktrace
 
-      - name: Check Gradle
-        run: ./gradlew --version
-
-      - name: Clean
-        run: ./gradlew clean --no-daemon
-
-      - name: Build JAR
-        run: ./gradlew build --no-daemon --stacktrace
-
-      - name: Show generated JARs
+      - name: List JAR files
         if: always()
         run: |
-          echo "Generated JAR files:"
-          find build/libs -maxdepth 1 -type f -name "*.jar" -print || true
+          echo "Files in build/libs:"
+          ls -lah build/libs || true
 
-      - name: Upload Mod JAR
+      - name: Upload JAR
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: OverworldPlus-1.21.10-v0.32.3
           path: build/libs/*.jar
-          if-no-files-found: erro
+          if-no-files-found: error
